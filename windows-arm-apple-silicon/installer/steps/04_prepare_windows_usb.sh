@@ -24,6 +24,44 @@ if [[ ${EUID} -ne 0 ]]; then
     SUDO="sudo"
 fi
 
+# If a direct Windows ISO URL is provided via the environment and no local path
+# has been specified, offer to download it automatically.  This allows
+# advanced users to pre‑define a download source (for example, a link to
+# Microsoft's official Windows 11 Arm ISO) via the `WINDOWS_ISO_URL` variable.
+# The downloaded file will be saved into the build directory or the current
+# working directory if BUILD_DIR is unset.
+if [[ -n "${WINDOWS_ISO_URL:-}" && -z "${WINDOWS_ISO_PATH:-}" ]]; then
+    echo "A Windows ISO download URL is configured: ${WINDOWS_ISO_URL}"
+    read -r -p "Do you want to download the Windows 11 ARM ISO now? [y/N] " download_confirm
+    case "$download_confirm" in
+        [yY][eE][sS]|[yY])
+            iso_output="${BUILD_DIR:-$(pwd)}/windows11_arm.iso"
+            echo "Downloading Windows ISO to ${iso_output}…"
+            if command -v curl >/dev/null 2>&1; then
+                if ! curl -L "${WINDOWS_ISO_URL}" -o "${iso_output}"; then
+                    echo "Download failed with curl." >&2
+                fi
+            elif command -v wget >/dev/null 2>&1; then
+                if ! wget -O "${iso_output}" "${WINDOWS_ISO_URL}"; then
+                    echo "Download failed with wget." >&2
+                fi
+            else
+                echo "Neither curl nor wget is available for downloading files." >&2
+            fi
+            if [[ -f "${iso_output}" ]]; then
+                WINDOWS_ISO_PATH="${iso_output}"
+                export WINDOWS_ISO_PATH
+                echo "Download complete. ISO saved to ${WINDOWS_ISO_PATH}."
+            else
+                echo "ISO download was not successful. You will be prompted for a local file." >&2
+            fi
+            ;;
+        *)
+            echo "Skipping automatic download. You will be prompted to provide an ISO path."
+            ;;
+    esac
+fi
+
 # Prompt for the Windows ISO path if not already provided via environment
 if [[ -z "${WINDOWS_ISO_PATH:-}" ]]; then
     read -r -p "Enter the full path to your Windows 11 ARM ISO: " WINDOWS_ISO_PATH
@@ -124,7 +162,7 @@ else
             exit 1
         }
     else
-        cp -R "${ISO_MOUNT}/"* "${USB_MOUNT}/" || {
+        cp -R "${ISO_MOUNT}"/* "${USB_MOUNT}"/ || {
             echo "File copy failed." >&2
             hdiutil detach "${ISO_MOUNT}" -quiet || true
             rm -rf "${ISO_MOUNT}"
